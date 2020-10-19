@@ -2,13 +2,12 @@
 class MySprite
     attr_accessor :x, :y, :z
 
-    def initialize(width, height, c)
+    def initialize(width, height)
         @x = 0
         @y = 0
         @z = 0
         @width = width
         @height = height
-        @color = c
     end
 
     def draw
@@ -19,55 +18,76 @@ class MySprite
     end
 end
 
+class MyTextSprite < MySprite
+    def initialize(text, width, height, c = nil)
+        super width, height
+
+        if c.nil?
+            @c = Gosu::Color::GREEN
+        else
+            @c = c
+        end
+        
+        @img = Gosu::Image.from_text(text, height, { :width => width })
+    end
+
+    def draw
+        @img.draw @x, @y, @z, 1, 1, @c
+    end
+end
+
 class MyWin < Gosu::Window
     def initialize
         super
 
-        @img = MySprite.new(64, 64, Gosu::Color::GREEN)
+        @img = MyTextSprite.new("hi", 64, 64)
         @img.x = 64
         @img.y = 64
         @img.z = 0
 
-        @img2 = MySprite.new(64, 64, Gosu::Color::RED)
+        @img2 = MyTextSprite.new("hello", 64, 64)
         @img2.x = 128
         @img2.y = 128
         @img2.z = 1
     end
 
-    def button_up(id)
+    def control(id, n)
         case id
-        when Gosu::KB_W
-            @img.y -= 8
-            @img2.y += 8
-        when Gosu::KB_A
-            @img.x -= 8
-            @img2.x += 8
-        when Gosu::KB_S
-            @img.y += 8
-            @img2.y -= 8
-        when Gosu::KB_D
-            @img.x += 8
-            @img2.x -= 8
+        when Gosu::GP_UP
+            @img.y -= n
+            @img2.y += n
+        when Gosu::GP_LEFT
+            @img.x -= n
+            @img2.x += n
+        when Gosu::GP_DOWN
+            @img.y += n
+            @img2.y -= n
+        when Gosu::GP_RIGHT
+            @img.x += n
+            @img2.x -= n
+#        when Gosu::GP_BUTTON_2
+        when Gosu::MS_LEFT
+            return false
         when Gosu::KB_Q
-            self.close!
+            return false
+        end
+
+        return true
+    end
+
+    def button_up(id)
+        if not control(id, 1)
+            self.close
         end
     end
 
     def button_down(id)
-        case id
-        when Gosu::KB_W
-            @img.y -= 8
-            @img2.y += 8
-        when Gosu::KB_A
-            @img.x -= 8
-            @img2.x += 8
-        when Gosu::KB_S
-            @img.y += 8
-            @img2.y -= 8
-        when Gosu::KB_D
-            @img.x += 8
-            @img2.x -= 8
-        end
+        control id, 1
+    end
+
+    def update
+        @img.x -= 2 if Gosu::button_down?(Gosu::GP_LEFT)
+        @img.x += 2 if Gosu::button_down?(Gosu::GP_RIGHT)
     end
 
     def draw
@@ -81,6 +101,7 @@ end
 
 class Scene_GosuMain < Scene_Base
     def initialize(win = nil, next_scene = nil)
+        $gosu_vmouse_enabled = true
         @next_scene = next_scene
 
         if win == nil
@@ -122,4 +143,3 @@ class Scene_GosuMain < Scene_Base
     end
 
 end
-  

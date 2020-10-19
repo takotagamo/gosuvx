@@ -1,8 +1,19 @@
-# z depth. can be changed before Window.new
-$gosu_layers = 4
 
 
 module Gosu
+    GP_LEFT = Input::LEFT
+    GP_RIGHT = Input::RIGHT
+    GP_UP = Input::UP
+    GP_DOWN = Input::DOWN
+    GP_BUTTON_0 = Input::A
+    GP_BUTTON_1 = Input::B
+    GP_BUTTON_2 = Input::C
+    GP_BUTTON_3 = Input::X
+    GP_BUTTON_4 = Input::Y
+    GP_BUTTON_5 = Input::Z
+    GP_BUTTON_6 = Input::L
+    GP_BUTTON_7 = Input::R
+
     KB_LEFT = Input::LEFT
     KB_RIGHT = Input::RIGHT
     KB_UP = Input::UP
@@ -14,13 +25,31 @@ module Gosu
     KB_S = Input::Y
     KB_D = Input::Z
     KB_Q = Input::L
+    KB_F5 = Input::F5
+    KB_F6 = Input::F6
+    KB_F7 = Input::F7
+    KB_F8 = Input::F8
+    KB_F9 = Input::F9
 
-    KEYS = [
-        Gosu::KB_LEFT, Gosu::KB_RIGHT, Gosu::KB_UP, Gosu::KB_DOWN,
-        Gosu::KB_X, Gosu::KB_Z,
-        Gosu::KB_W, Gosu::KB_A, Gosu::KB_S, Gosu::KB_D,
-        Gosu::KB_Q
-    ]
+    # what id is safe?
+    MS_LEFT = 0.1
+    MS_RIGHT = 0.2
+
+    def self.available_width(win = nil)
+        640
+    end
+
+    def self.available_height(win = nil)
+        480
+    end
+
+    def self.button_down?(id)
+        $gosu_buttons.include?(id) and Input::press?(id)
+    end
+
+    def self.fps
+        Graphics.frame_rate
+    end
 
     def self.draw_rect(x, y, width, height, c, z = 0)
         $gosu_window._layer(z).bitmap.fill_rect x, y, width, height, c
@@ -126,6 +155,7 @@ module Gosu
     end
 end
 
+
 # hsvは後回し
 class Gosu::Color < Color
     attr_reader :gl, :hue, :satulation
@@ -179,6 +209,31 @@ Gosu::Color::BLUE = Gosu::Color.argb(255, 0, 0, 255)
 
 
 class Gosu::Image
+    def self.from_text(text, line_height, options = {})
+        if options[:width].nil?
+            rect = $gosu_window._layers(0).text_size(text)
+
+            width = line_height * (rect.width / rect.height)
+        else
+            width = options[:width]
+        end
+
+        result = Gosu::Image.new(nil, {
+            :rect => {
+                :x => 0, :y => 0,
+                :width => width,
+                :height => line_height
+            }
+        })
+
+        # redraw with different font when called .draw with different color
+        result._bitmap.draw_text result._bitmap.rect, text
+
+        result
+    end
+
+    attr_reader :_bitmap
+
     def initialize(source = nil, options = {})
         if source.nil?
             size = if options[:rect].nil? then
@@ -187,23 +242,91 @@ class Gosu::Image
                 options[:rect]
             end
 
-            @bitmap = Bitmap.new(size.width, size.height)
+            @_bitmap = Bitmap.new(size[:width], size[:height])
         else
-            @bitmap = Bitmap.new(source)
+            @_bitmap = Bitmap.new(source)
         end
-
-        $gosu_window._push_bitmap @bitmap
     end
 
     def subimage(left, top, width, height)
         result = Gosu::Image.new(width, height)
-        result.blt 0, 0, @bitmap, Rect.new(left, top, width, height)
+        result.blt 0, 0, @_bitmap, Rect.new(left, top, width, height)
 
         result
     end
 
-    def draw(x, y, z)
-        $gosu_window._layer(z).bitmap.blt x, y, @bitmap
+    def draw(x, y, z, scale_x = 1, scale_y = 1, color = 0xFFFFFFFF)
+        dest = Rect.new(x, y, @_bitmap.width * scale_x, @_bitmap.height * scale_y)
+
+        $gosu_window._layer(z).bitmap.stretch_blt dest, @_bitmap, @_bitmap.rect
+    end
+end
+
+
+# accepts only $gosu_song_length ms files
+class Gosu::Song
+    @@current_song = nil
+
+    def self.current_song
+        @@current_song
+    end
+
+    def self._update
+        return if @@current_song.nil? 
+            
+        song = @@current_song
+
+        if song.playing and not song._first_frame.nil?
+            if song._first_frame >= Graphics.frame_count - $gosu_song_length
+                song.stop
+            end
+        end
+    end
+
+    def initialize(window, filename = nil)
+        if filename.nil?
+            filename = window
+        end
+
+        @filename = filename
+        @playing = false
+        @paused = true
+        @volume = 1
+        @first_frame = nil
+    end
+
+    def playing?
+        @playing
+    end
+
+    def play(looping = false)
+        Audio.bgm_play @filename, @volume
+
+        if not looping
+            @first_frame = Graphics.frame_count
+        end
+
+        @@current_song = self
+    end
+
+    def paused?
+        @paused
+    end
+
+    # con not resume
+    def pause
+        Audio.bgm_stop
+        @paused = true
+        @playing = false
+        @first_frame = -1
+    end
+
+    def stop
+        Audio.bgm_stop
+        @playing = false
+        @first_frame = -1
+
+        @@current_song = nil
     end
 end
 
@@ -211,11 +334,11 @@ end
 class Gosu::Window
     def initialize(width = -1, height = -1, options = {})
         @original_frame_rate = Graphics.frame_rate
-        if options[:update_interval] != nil
-            @update_interval = options[:update_interval]
+        if not options[:update_interval].nil?
+            update_interval = options[:update_interval]
         end
 
-        @resizable = options[:resizable] != nil and options[:resizable]
+        @resizable = (not options[:resizable].nil?) and options[:resizable]
 
         # always ignores options[:fullscreen]
 
@@ -226,12 +349,6 @@ class Gosu::Window
         Graphics.resize_screen width, height
 
         @needs_close = false
-
-        @keys = {}
-
-        Gosu::KEYS.each {|i|
-            @keys[i] = false
-        }
     
         @layers = []
 
@@ -244,6 +361,30 @@ class Gosu::Window
             layer.z = i
 
             @layers.push layer
+        }
+
+        @mouse_x = 0
+        @mouse_y = 0
+
+        if $gosu_vmouse_enabled
+            $gosu_vmouse = Sprite.new
+            $gosu_vmouse.bitmap = Bitmap.new(4, 4)
+            $gosu_vmouse.bitmap.fill_rect 0, 0, 4, 4, Color.new(255, 255, 255)
+            $gosu_vmouse.bitmap.fill_rect 1, 1, 3, 3, Color.new(127, 127, 127)
+            $gosu_vmouse.bitmap.clear_rect 2, 2, 2, 2
+            $gosu_vmouse.x = 0
+            $gosu_vmouse.y = 0
+            $gosu_vmouse.z = $gosu_layers
+
+            $gosu_buttons = $gosu_buttons_all.dup.find_all { |i| not $gosu_buttons_vmouse.include?(i) }
+        else
+            $gosu_buttons = $gosu_buttons_all
+        end
+
+        @button_stats = {}
+
+        $gosu_buttons_all.each {|i|
+            @button_stats[i] = false
         }
 
         $gosu_window = self
@@ -260,6 +401,8 @@ class Gosu::Window
         @layers.each {|i| i.dispose }
         @layers.clear
 
+        $gosu_vmouse.dispose
+
         $gosu_window = nil
     end
 
@@ -274,7 +417,7 @@ class Gosu::Window
 
     def width=(value)
         if @resizable
-            Graphics.resize_screen value, Graphics.height
+            Graphics.resize_screen Gosu::_clamp(0, Gosu::available_width, value), Graphics.height
         end
     end
 
@@ -284,7 +427,7 @@ class Gosu::Window
 
     def height=(value)
         if @resizable
-            Graphics.resize_screen Graphics.width, value
+            Graphics.resize_screen Graphics.width, Gosu::_clamp(0, Gosu::available_height, value)
         end
     end
 
@@ -299,13 +442,19 @@ class Gosu::Window
     end
 
     def close
-        false
+        Graphics.frame_rate = @original_frame_rate
+        width = @original_width
+        height = @original_height
+
+        @needs_close = true
     end
 
     def draw
         @layers.each {|i|
             i.update
         }
+
+        $gosu_vmouse.update
 
         Graphics.update
 
@@ -325,32 +474,54 @@ class Gosu::Window
         @resizable
     end
 
+    # id triggers id2 event
+    def _update_button_event(id, id2)
+        if Input.trigger?(id)
+            @button_stats[id] = true
+            self.button_down(id2)
+        elsif not Input.press?(id) and @button_stats[id]
+            @button_stats[id] = false
+            self.button_up(id2)
+        end
+    end
+
     def show
         while not @needs_close
             self.draw
             Input.update
 
-            Gosu::KEYS.each {|i|
-                if Input.trigger?(i)
-                    @keys[i] = true
-                    self.button_down(i)
-                elsif not Input.press?(i) and @keys[i]
-                    @keys[i] = false
-                    self.button_up(i)
-                end
+            if $gosu_vmouse_enabled
+                @mouse_x -= $gosu_vmouse_speed if Input.press?(Input::LEFT)
+                @mouse_x += $gosu_vmouse_speed if Input.press?(Input::RIGHT)
+                @mouse_y -= $gosu_vmouse_speed if Input.press?(Input::UP)
+                @mouse_y += $gosu_vmouse_speed if Input.press?(Input::DOWN)
+
+                $gosu_vmouse.x = @mouse_x
+                $gosu_vmouse.y = @mouse_y
+
+                self._update_button_event Gosu::KB_X, Gosu::MS_RIGHT
+                self._update_button_event Gosu::KB_Z, Gosu::MS_LEFT
+            end
+
+            $gosu_buttons.each {|i|
+                self._update_button_event i, i
             }
 
             self.update
+
+            Gosu::Song._update
+        end
+
+        if not Gosu::Song.current_song.nil?
+            Gosu::Song.current_song.stop
         end
     end
 
     def close!
-        Graphics.frame_rate = @original_frame_rate
-        width = @original_width
-        height = @original_height
-
-        @needs_close = true
+        self.close
     end
+
+    attr_reader :mouse_x, :mouse_y
 
     # incompatible things
 
@@ -361,14 +532,6 @@ class Gosu::Window
 
     def caption
         @caption
-    end
-
-    def mouse_x
-        0
-    end
-
-    def mouse_y
-        0
     end
 
     def text_input
@@ -386,3 +549,36 @@ class Gosu::Window
         false
     end
 end
+
+
+
+# can be changed before Window.new
+
+# z depth. 
+$gosu_layers = 4
+# in frames. limitation: all files should have this length.
+$gosu_song_length = 7200
+# enables virtual mouse that uses BUTTON_1/2 + UDLR 
+$gosu_vmouse_enabled = false
+# pixels per frame
+$gosu_vmouse_speed = 2
+# for light responce
+$gosu_disabled_buttons = []
+
+# for internal use
+
+$gosu_buttons_vmouse = [
+    Gosu::GP_LEFT, Gosu::GP_RIGHT, Gosu::GP_UP, Gosu::GP_DOWN,  
+    Gosu::GP_BUTTON_1, Gosu::GP_BUTTON_2
+]
+
+$gosu_buttons_all = [
+    Gosu::GP_LEFT, Gosu::GP_RIGHT, Gosu::GP_UP, Gosu::GP_DOWN,  
+    Gosu::GP_BUTTON_0, Gosu::GP_BUTTON_1, Gosu::GP_BUTTON_2,  
+    Gosu::GP_BUTTON_3, Gosu::GP_BUTTON_4, Gosu::GP_BUTTON_5,  
+    Gosu::GP_BUTTON_6, Gosu::GP_BUTTON_7,  
+    Gosu::KB_F5, Gosu::KB_F6, Gosu::KB_F7, Gosu::KB_F8, Gosu::KB_F9
+]
+$gosu_buttons = $gosu_buttons_all
+$gosu_window = nil
+$gosu_vmouse = nil
