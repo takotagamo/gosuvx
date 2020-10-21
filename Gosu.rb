@@ -1,4 +1,23 @@
 
+module GosuVx
+    def self.min(a, b)
+        if a < b then a else b end
+    end
+
+    def self.max(a, b)
+        if a < b then b else a end
+    end
+
+    def self.clamp(min, max, v)
+        if v < min then
+            min
+        elsif v > max then
+            max
+        else
+            v
+        end
+    end
+end
 
 module Gosu
     GP_LEFT = Input::LEFT
@@ -55,32 +74,18 @@ module Gosu
         $gosu_window._layer(z).bitmap.fill_rect x, y, width, height, c
     end
 
-    def self._min(a, b)
-        if a < b then a else b end
-    end
-
-    def self._max(a, b)
-        if a < b then b else a end
-    end
-
-    def self._clamp(min, max, v)
-        if v < min then
-            min
-        elsif v > max then
-            max
-        else
-            v
-        end
-    end
-
     def self.draw_line(x1, y1, c1, x2, y2, c2, z = 0)
+        Gosu::_draw_line x1, y1, c1, x2, y2, c2, $gosu_window._layer(z).bitmap
+    end
+
+    def self._draw_line(x1, y1, c1, x2, y2, c2, bitmap)
         if c1 == c2
             if x1 == x2
-                Gosu::draw_rect x1, Gosu::_min(y1, y2), 1, Gosu::_max(y1, y2), c1
+                Gosu::draw_rect x1, GosuVx::min(y1, y2), 1, GosuVx::max(y1, y2), c1
 
                 return
             elsif y1 == y2
-                Gosu::draw_rect Gosu::_min(x1, x2), y1, Gosu::_max(x1, x2), 1, c1
+                Gosu::draw_rect GosuVx::min(x1, x2), y1, GosuVx::max(x1, x2), 1, c1
 
                 return
             end
@@ -111,8 +116,6 @@ module Gosu
         ub = db.to_f / n
         ua = da.to_f / n
 
-        bitmap = $gosu_window._layer(z).bitmap
-
         (n + 1).times {|i|
             x, y = (x1 + ux * i).floor, (y1 + uy * i).floor
             c = Gosu::Color.argb((a1 + ua * i).floor, (r1 + ur * i).floor, (g1 + ug * i).floor, (b1 + ub * i).floor)
@@ -122,6 +125,59 @@ module Gosu
     end
 
     def self.draw_triangle(x1, y1, c1, x2, y2, c2, x3, y3, c3, z = 0)
+        rect = Gosu::_get_triangle_rect(x1, y1, x2, y2, x3, y3)
+        left = rect.x
+        top = rect.y
+        rect.x = 0
+        rect.y = 0
+
+        x1 -= left
+        x2 -= left
+        x3 -= left
+        y1 -= top
+        y2 -= top
+        y3 -= top
+
+        if x2 < x1 and x1 < x3
+            x1, y1, c1,  x2, y2, c2 = x2, y2, c2,  x1, y1, c1
+        elsif x3 < x2 and x2 < x1
+                x1, y1, c1,  x2, y2, c2,  x3, y3, c3 = x3, y3, c3,  x2, y2, c2,  x1, y1, c1
+        elsif x3 < x2 and x2 < x1
+            x1, y1, c1,  x3, y3, c3 = x3, y3, c3,  x1, y1, c1
+        end
+
+        cacheKey = "#{x1},#{y1},#{c1.gl};#{x2},#{y2},#{c2.gl};#{x3},#{y3},#{c3.gl}"
+        caches = $gosu_caches
+
+        cache = caches.find {|i| i.key == cacheKey }
+
+        if not cache.nil?
+            caches.delete(cache)
+            caches.insert 0, cache
+        else
+            if caches.size >= $gosu_caches_size
+                cache = caches.pop
+                cache.dispose
+                cache = nil
+            end
+
+            cache = GosuVx::Cache.new(cacheKey, rect)
+            caches = caches.insert(0, cache)
+
+            Gosu::_draw_triangle x1, y1, c1, x2, y2, c2, x3, y3, c3, cache.bitmap
+        end
+
+        $gosu_window._layer(z).bitmap.blt left, top, cache.bitmap, rect
+    end
+
+    def self._get_triangle_rect(x1, y1, x2, y2, x3, y3)
+        xs = [x1, x2, x3].sort
+        ys = [y1, y2, y3].sort
+
+        Rect.new(xs[0], ys[0], xs[2] - xs[0] + 1, ys[2] - ys[0] + 1)
+    end
+
+    def self._draw_triangle(x1, y1, c1, x2, y2, c2, x3, y3, c3, bitmap)
         r1, r2 = c1.red, c2.red
         g1, g2 = c1.green, c2.green
         b1, b2 = c1.blue, c2.blue
@@ -150,8 +206,21 @@ module Gosu
         (n + 1).times {|i|
             c = Gosu::Color.argb((a1 + ua * i).floor, (r1 + ur * i).floor, (g1 + ug * i).floor, (b1 + ub * i).floor)
 
-            Gosu::draw_line((x1 + ux * i).floor, (y1 + uy * i).floor, c, x3, y3, c3, z)
+            Gosu::_draw_line((x1 + ux * i).floor, (y1 + uy * i).floor, c, x3, y3, c3, bitmap)
         }
+    end
+end
+
+class GosuVx::Cache
+    attr_reader :key, :bitmap
+
+    def initialize(key, rect)
+        @key = key
+        @bitmap = Bitmap.new(rect.width, rect.height)
+    end
+
+    def dispose
+        @bitmap.dispose
     end
 end
 
@@ -173,7 +242,7 @@ class Gosu::Color < Color
     end
 
     def gl
-        Gosu::Color._gatherGl(alpha, red, green, blue)
+        Gosu::Color._gatherGl(alpha.floor, red.floor, green.floor, blue.floor)
     end
 
     def self._splitGl(v)
@@ -352,7 +421,7 @@ class Gosu::Window
     
         @layers = []
 
-        $gosu_layers = Gosu::_clamp(1, 16, $gosu_layers)
+        $gosu_layers = GosuVx::clamp(1, 16, $gosu_layers)
         $gosu_layers.times {|i|
             layer = Sprite.new
             layer.bitmap = Bitmap.new(640, 480)
@@ -387,12 +456,14 @@ class Gosu::Window
             @button_stats[i] = false
         }
 
+        $gosu_caches.clear
+
         $gosu_window = self
     end
 
     # Maker's Bitmap
     def _layer(z)
-        z = Gosu::_clamp(0, @layers.size - 1, z)
+        z = GosuVx::clamp(0, @layers.size - 1, z)
 
         @layers[z]
     end
@@ -401,7 +472,8 @@ class Gosu::Window
         @layers.each {|i| i.dispose }
         @layers.clear
 
-        $gosu_vmouse.dispose
+        $gosu_vmouse.dispose if $gosu_vmouse_enabled
+        $gosu_caches.clear
 
         $gosu_window = nil
     end
@@ -417,7 +489,7 @@ class Gosu::Window
 
     def width=(value)
         if @resizable
-            Graphics.resize_screen Gosu::_clamp(0, Gosu::available_width, value), Graphics.height
+            Graphics.resize_screen GosuVx::clamp(0, Gosu::available_width, value), Graphics.height
         end
     end
 
@@ -427,7 +499,7 @@ class Gosu::Window
 
     def height=(value)
         if @resizable
-            Graphics.resize_screen Graphics.width, Gosu::_clamp(0, Gosu::available_height, value)
+            Graphics.resize_screen Graphics.width, GosuVx::clamp(0, Gosu::available_height, value)
         end
     end
 
@@ -454,7 +526,7 @@ class Gosu::Window
             i.update
         }
 
-        $gosu_vmouse.update
+        $gosu_vmouse.update if $gosu_vmouse_enabled
 
         Graphics.update
 
@@ -558,6 +630,8 @@ end
 $gosu_layers = 4
 # in frames. limitation: all files should have this length.
 $gosu_song_length = 7200
+# number of cached shapes (currently triangles-only)
+$gosu_caches_size = 32
 # enables virtual mouse that uses BUTTON_1/2 + UDLR 
 $gosu_vmouse_enabled = false
 # pixels per frame
@@ -582,3 +656,4 @@ $gosu_buttons_all = [
 $gosu_buttons = $gosu_buttons_all
 $gosu_window = nil
 $gosu_vmouse = nil
+$gosu_caches = []
