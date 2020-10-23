@@ -1,20 +1,37 @@
 
-class MySprite
+class MySprite  
     attr_accessor :x, :y, :z, :width, :height
 
     def initialize(width, height, z)
         @x = 0
         @y = 0
         @z = z
-        @width = width
-        @height = height
+        @width = width + z
+        @height = height + z
+        @c1 = Gosu::Color.rgba(255, 0, 0, 127)
+        @c2 = Gosu::Color.rgba(0, 255, 0, 127)
+        @c3 = Gosu::Color.rgba(0, 0, 255, 127)
     end
 
     def draw
-        x2 = @x + @width - 1
-        y2 = @y + @height - 1
+        right = @x + @width - 1
+        bottom = @y + @height - 1
 
-        Gosu::draw_triangle @x, @y, Gosu::Color::RED, @x, y2, Gosu::Color::GREEN, x2, y2, Gosu::Color::BLUE, @z
+        x1, y1 = @x, @y
+        x2, y2 = @x, bottom
+        x3, y3 = right, bottom
+
+        if rand(8) == 0
+            @c2.alpha = 127 + rand(2) * 64
+
+            if @z == 0
+                @c1.alpha = 127 + rand(2) * 64
+            else
+                @c3.alpha = 127 + rand(2) * 64
+            end
+        end
+
+        Gosu::draw_triangle x1, y1, @c1, x2, y2, @c2, x3, y3, @c3, @z
     end
 
     def collide?(rect)
@@ -42,15 +59,15 @@ class MyTextSprite < MySprite
 end
 
 class MyWin < Gosu::Window
-    def initialize
-        super
+    def initialize(width, height, options)
+        super(width, height, options)
 
         @img = MySprite.new(64, 64, 1)
         @img.x = 64
         @img.y = 64
 
         @imgs = (0...16).map {|i|
-            img = MySprite.new(64, 64, 2)
+            img = MySprite.new(64, 64, rand($gosu_zdepth - 1) + 1)
             img.x = rand(width - 64)
             img.y = rand(height - 64)
 
@@ -96,6 +113,8 @@ class MyWin < Gosu::Window
     end
 
     def update
+        super
+
         @img.x -= 2 if Gosu::button_down?(Gosu::GP_LEFT)
         @img.x += 2 if Gosu::button_down?(Gosu::GP_RIGHT)
         @img.y -= 2 if Gosu::button_down?(Gosu::GP_UP)
@@ -139,12 +158,20 @@ class Scene_GosuMain < Scene_Base
 
     def post_start
         super
+
+        # if reuse this window in RPG Maker-style
+        # @win._activate
     end
 
     def update
         super
 
+        ## Gosu-style (fast, modal)
         @win.show
+
+        ## RPG Maker-style (slow(?), modeless)
+        # @win.update
+        # return if @win._opened
 
         if @next_scene.nil?
             $scene = Scene_Title.new
@@ -162,7 +189,7 @@ class Scene_GosuMain < Scene_Base
     def terminate
         super
 
-        @win._dispose if not @win_cls.is_a?(Gosu::Window)
+        GosuVx::dispose_cache
         @win = nil
     end
 
