@@ -41,8 +41,8 @@ class MySprite
 end
 
 class MyTextSprite < MySprite
-    def initialize(text, width, height, c = nil)
-        super width, height
+    def initialize(text, width, height, z = 0, c = nil)
+        super width, height, z
 
         if c.nil?
             @c = Gosu::Color::GREEN
@@ -51,18 +51,50 @@ class MyTextSprite < MySprite
         end
         
         @img = Gosu::Image.from_text(text, height, { :width => width })
+        @i = 1.0
+        @d = 0.0078125
     end
 
     def draw
-        @img.draw @x, @y, @z, 1, 1, @c
+        @img.draw @x, @y, @z, @i, @i
+
+        @i = @i + @d
+
+        if @i > 2 or @i <= 0
+            @d = -@d
+        end
+    end
+end
+
+class MyImageSprite < MySprite
+    def initialize(filename, z = 0)
+        img = Gosu::Image.new(filename)
+
+        super img.width, img.height, z
+        
+        @img  = img
+        @i = 0
+    end
+
+    def draw
+        2.times {|i|
+            j = (i + 1) * 8
+            @img.draw_rot(@x + j, @y + j, @z + i, @i)
+        }
+
+        @i = (@i + 4) % 360
     end
 end
 
 class MyWin < Gosu::Window
-    def initialize(width, height, options)
+    def initialize(width = Graphics.width, height = Graphics.height, options = {})
         super(width, height, options)
 
-        @img = MySprite.new(64, 64, 1)
+        @txtimg = MyTextSprite.new("find it", 128, 16, 2)
+        @txtimg.x = 128
+        @txtimg.y = 128
+
+        @img = MyImageSprite.new("Graphics/Pictures/image.png", 1)
         @img.x = 64
         @img.y = 64
 
@@ -127,13 +159,13 @@ class MyWin < Gosu::Window
     end
 
     def draw
-        super
-
         Gosu::draw_rect 0, 0, width, height, Gosu::Color::BLACK
         @img.draw
+        @txtimg.draw
         @imgs.each {|i| i.draw }
     end
 end
+
 
 class Scene_GosuMain < Scene_Base
     def initialize(win = nil, next_scene = nil)
@@ -190,6 +222,7 @@ class Scene_GosuMain < Scene_Base
         super
 
         GosuVx::dispose_cache
+        GosuVx::dispose_images
         @win = nil
     end
 

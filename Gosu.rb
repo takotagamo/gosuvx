@@ -18,9 +18,52 @@ module GosuVx
         end
     end
 
+    # returns (found:bool, cached_bitmap)
+    def self.get_cache(key, rect = nil, bitmap = nil, caches = nil)
+        caches = $gosu_caches if caches.nil?
+
+        cache = caches.find {|i| i.key == key }
+        found = (not cache.nil?)
+
+        if found
+            caches.delete(cache)
+            caches.insert 0, cache
+        else
+            if caches.size >= $gosu_caches_size
+                cache = caches.pop
+                cache.dispose
+                cache = nil
+            end
+
+            cache = GosuVx::Cache.new(key, rect, bitmap)
+
+            caches = caches.insert(0, cache)
+        end
+
+        return found, cache.bitmap
+    end
+
     def self.dispose_cache
         $gosu_caches.each {|i| i.dispose }
         $gosu_caches.clear
+    end
+
+    def self.dispose_images
+        $gosu_images.each {|i| i._dispose }
+        $gosu_images.clear
+    end
+
+    def self.max_rotated_width(w, h)
+        a = -Math.atan2(h, w)
+        
+        (Math.cos(a) * w - Math.sin(a) * h).floor
+    end
+
+    def self.rotate(x, y, a)
+        x2 = Math.cos(a) * x - Math.sin(a) * y
+        y2 = Math.sin(a) * x + Math.cos(a) * y
+
+        return x2, y2
     end
 end
 
@@ -39,6 +82,32 @@ class GosuVx::ColoredPoint
         else
             0
         end
+    end
+end
+
+class Numeric
+    def radians_to_degrees
+        self / Math::PI * 180
+    end
+
+    def degrees_to_radians
+        self / 180 * Math::PI
+    end
+
+    def gosu_to_radians
+        (self - 90) / 180 * Math::PI
+    end
+
+    def radians_to_gosu
+        self / Math::PI * 180 + 90
+    end
+
+    def _gosu_to_degrees
+        self - 90
+    end
+
+    def _degrees_to_gosu
+        self + 90
     end
 end
 
@@ -160,27 +229,13 @@ module Gosu
         x1, y1, c1, x2, y2, c2, x3, y3, c3 = p1.x, p1.y, p1.c, p2.x, p2.y, p2.c, p3.x, p3.y, p3.c
 
         cacheKey = "#{x1},#{y1},#{c1.gl};#{x2},#{y2},#{c2.gl};#{x3},#{y3},#{c3.gl}"
-        caches = $gosu_caches
 
-        cache = caches.find {|i| i.key == cacheKey }
-
-        if not cache.nil?
-            caches.delete(cache)
-            caches.insert 0, cache
-        else
-            if caches.size >= $gosu_caches_size
-                cache = caches.pop
-                cache.dispose
-                cache = nil
-            end
-
-            cache = GosuVx::Cache.new(cacheKey, rect)
-            caches = caches.insert(0, cache)
-
-            Gosu::_draw_triangle x1, y1, c1, x2, y2, c2, x3, y3, c3, cache.bitmap
+        found, cache = GosuVx::get_cache(cacheKey, rect)
+        if not found
+            Gosu::_draw_triangle x1, y1, c1, x2, y2, c2, x3, y3, c3, cache
         end
 
-        $gosu_window._layer(z).bitmap.blt left, top, cache.bitmap, rect
+        $gosu_window._layer(z).bitmap.blt left, top, cache, rect
     end
 
     def self._get_triangle_rect(x1, y1, x2, y2, x3, y3)
@@ -210,9 +265,16 @@ end
 class GosuVx::Cache
     attr_reader :key, :bitmap
 
-    def initialize(key, rect)
+    # new(key: string, rect: Rect)
+    # / new(key: string, bitmap: Bitmap)
+    def initialize(key, rect = nil, bitmap = nil)
         @key = key
-        @bitmap = Bitmap.new(rect.width, rect.height)
+
+        if rect.nil?
+            @bitmap = bitmap
+        else
+            @bitmap = Bitmap.new(rect.width, rect.height)
+        end
     end
 
     def dispose
@@ -275,55 +337,144 @@ Gosu::Color::BLUE = Gosu::Color.argb(255, 0, 0, 255)
 
 class Gosu::Image
     def self.from_text(text, line_height, options = {})
-        if options[:width].nil?
-            rect = $gosu_window._layers(0).text_size(text)
+        bitmap = Bitmap.new(64, 64)
 
-            width = line_height * (rect.width / rect.height)
-        else
-            width = options[:width]
+        fontsize = 0
+        txt_rect = nil
+
+        40.times {|i|
+            fontsize = 40 - i
+
+            bitmap.font.size = fontsize
+            txt_rect = bitmap.text_size(text)
+
+            break if txt_rect.height < line_height
+        }
+
+        bmp_rect = Rect.new(0, 0, txt_rect.width, line_height)
+
+        if not options[:width].nil?
+            bmp_rect.width = options[:width]
         end
 
-        result = Gosu::Image.new(nil, {
-            :rect => {
-                :x => 0, :y => 0,
-                :width => width,
-                :height => line_height
-            }
-        })
+        result = Gosu::Image.new(nil, { :rect => bmp_rect })
 
         # redraw with different font when called .draw with different color
-        result._bitmap.draw_text result._bitmap.rect, text
+        result._bitmap.draw_text txt_rect, text
 
         result
     end
 
+    def self._get_fontsize_by_height(h)
+    end
+
     attr_reader :_bitmap
+    attr_reader :width, :height
 
     def initialize(source = nil, options = {})
+        @_source = source
+
         if source.nil?
             size = if options[:rect].nil? then
                 { :width => 640, :height => 480 }
             else
-                options[:rect]
+                { :width => options[:rect].width, :height => options[:rect].height }
             end
 
-            @_bitmap = Bitmap.new(size[:width], size[:height])
+            @width, @height = size[:width], size[:height]
+
+            @_bitmap = Bitmap.new(@width, @height)
         else
             @_bitmap = Bitmap.new(source)
+
+            @width, @height = @_bitmap.width, @_bitmap.height
         end
+
+        @_rwidth = GosuVx::max_rotated_width(@width, @height)
+        @_rcaches = []
+
+        $gosu_images.push self
+    end
+
+    def _dispose
+        @_bitmap.dispose
+        @_bitmap = nil
+
+        @_rcaches.each {|i| i.dispose }
+        @_rcaches.clear
     end
 
     def subimage(left, top, width, height)
-        result = Gosu::Image.new(width, height)
-        result.blt 0, 0, @_bitmap, Rect.new(left, top, width, height)
+        rect = self._clamped_subimage_rect(left, top, width, height)
+
+        result = Gosu::Image.new(rect.width, rect.height)
+        result._bitmap.blt 0, 0, @_bitmap, rect
 
         result
     end
+    
+    def _clamped_subimage_rect(x, y, width, height)
+        left = GosuVx::clamp(0, @width - 1, x)
+        top = GosuVx::clamp(0, @height - 1, y)
+        right = GosuVx::clamp(0, @width, width + x)
+        bottom = GosuVx::clamp(0, @height, height + y)
+        right2 = GosuVx::clamp(0, @width, right2 - x)
+        bottom2 = GosuVx::clamp(0, @height, bottom2 - y)
+
+        width2 = GosuVx::clamp(0, @width, right2 - left)
+        height2 = GosuVx::clamp(0, @height, bottom2 - top)
+
+        return Rect.new(left, top, width2, height2)
+    end
 
     def draw(x, y, z, scale_x = 1, scale_y = 1, color = 0xFFFFFFFF)
-        dest = Rect.new(x, y, @_bitmap.width * scale_x, @_bitmap.height * scale_y)
+        dest = Rect.new(x, y, @width * scale_x, @height * scale_y)
 
         $gosu_window._layer(z).bitmap.stretch_blt dest, @_bitmap, @_bitmap.rect
+    end
+
+    def draw_rot(x, y, z, angle, scale_x = 1, scale_y = 1)
+        dest = Rect.new(x - @_rwidth / 2, y - @_rwidth / 2, @_rwidth * scale_x, @_rwidth * scale_y)
+        cache = self._create_rotated(angle)
+
+        $gosu_window._layer(z).bitmap.stretch_blt dest, cache, cache.rect
+    end
+
+    # a: degrees
+    def _create_rotated(a)
+        a = a % 360
+        cache_idx = (a / $gosu_angle_resolution).floor
+
+        return @_rcaches[cache_idx] if not @_rcaches[cache_idx].nil?
+
+        cache = Bitmap.new(@_rwidth, @_rwidth)
+        @_rcaches[cache_idx] = cache
+
+        # center of rotated with pedding
+        center_x, center_y = @_rwidth / 2, @_rwidth / 2
+        # center with no padding
+        target_center_x, target_center_y = @width / 2, @height / 2
+        view_x, view_y = center_x - target_center_x, center_y - target_center_y
+
+        # reversed
+        a = (360 - cache_idx * $gosu_angle_resolution).degrees_to_radians
+
+        @_rwidth.times {|y|
+            @_rwidth.times {|x|
+                x2, y2 = GosuVx::rotate(x - center_x, y - center_y, a)
+
+                # position with no padding
+                x3, y3 = x2 + center_x - view_x, y2 + center_y - view_y
+
+                if (0...@width).include?(x3) and (0...@height).include?(y3)
+                    c = @_bitmap.get_pixel(x3, y3)
+
+                    cache.fill_rect(x, y, 1, 1, c)
+                end
+            }
+        }
+
+        cache
     end
 end
 
@@ -547,6 +698,9 @@ class Gosu::Window
     end
 
     def draw
+    end
+
+    def _draw
         @layers.each {|i|
             i.update
         }
@@ -578,6 +732,7 @@ class Gosu::Window
         end
 
         self.draw
+        self._draw
         Input.update
         Gosu::Song._update
 
@@ -670,13 +825,15 @@ $gosu_zdepth = 4
 # in frames. limitation: all files should have this length.
 $gosu_song_length = 7200
 # number of cached shapes (currently triangles-only)
-$gosu_caches_size = 32
+$gosu_caches_size = 128
 # enables virtual mouse that uses BUTTON_1/2 + UDLR 
 $gosu_vmouse_enabled = false
 # pixels per frame
 $gosu_vmouse_speed = 2
 # for light responce
 $gosu_disabled_buttons = []
+# unit in degrees
+$gosu_angle_resolution = 360.0 / 24
 
 # for internal use
 
@@ -695,3 +852,4 @@ $gosu_buttons_all = [
 $gosu_buttons = $gosu_buttons_all
 $gosu_window = nil
 $gosu_caches = []
+$gosu_images = []
