@@ -85,6 +85,18 @@ class GosuVx::ColoredPoint
     end
 end
 
+if RUBY_VERSION == "1.8.1"
+    def Graphics.width
+        640
+    end
+    def Graphics.height
+        480
+    end
+    def Graphics.resize_screen(width, height)
+    end
+end
+
+
 class Numeric
     def radians_to_degrees
         self / Math::PI * 180
@@ -710,7 +722,7 @@ class Gosu::Window
         Graphics.update
 
         @layers.each {|i|
-            i.bitmap.clear_rect 0, 0, 640, 480
+            i.bitmap.clear
         }
     end
 

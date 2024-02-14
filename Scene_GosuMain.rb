@@ -1,3 +1,33 @@
+class GosuVx_Scene_Base
+    def main
+        start
+        Graphics.transition
+        post_start
+        while $scene == self
+            update
+        end
+        pre_terminate
+        terminate
+    end
+
+    def start
+    end
+
+    def post_start
+    end
+
+    def update
+    end
+
+    def terminate
+    end
+
+    def pre_terminate
+    end
+end    
+
+Scene_Base = GosuVx_Scene_Base if RUBY_VERSION == "1.8.1"
+
 
 class MySprite  
     attr_accessor :x, :y, :z, :width, :height
